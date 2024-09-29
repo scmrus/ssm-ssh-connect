@@ -63,7 +63,13 @@ func main() {
 	defer logFile.Close()
 
 	// create logger
-	logger := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{})).With("pid", os.Getpid())
+	opts := &slog.HandlerOptions{
+		Level: slog.LevelError,
+	}
+	if os.Getenv("SSM_SSH_CONNECT_DEBUG") == "1" {
+		opts.Level = slog.LevelDebug
+	}
+	logger := slog.New(slog.NewTextHandler(logFile, opts)).With("pid", os.Getpid())
 	slog.SetDefault(logger)
 
 	// load AWS configuration
