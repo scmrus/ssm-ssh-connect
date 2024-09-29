@@ -48,7 +48,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to create app home directory: %v\n", err)
 		os.Exit(1)
 	}
-	logFile, err := os.OpenFile(cfg.AppHome+"/ssm-ssh-connect.log", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0660)
+
+	// remove log file if its size is greater than 1MB to avoid filling up disk space
+	s, err := os.Stat(cfg.AppHome + "/ssm-ssh-connect.log")
+	if err == nil && s.Size() > 1024*1024 {
+		os.Remove(cfg.AppHome + "/ssm-ssh-connect.log")
+	}
+
+	logFile, err := os.OpenFile(cfg.AppHome+"/ssm-ssh-connect.log", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0660)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to open log file: %v\n", err)
 		os.Exit(1)
@@ -56,7 +63,7 @@ func main() {
 	defer logFile.Close()
 
 	// create logger
-	logger := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{}))
+	logger := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{})).With("pid", os.Getpid())
 	slog.SetDefault(logger)
 
 	// load AWS configuration
@@ -96,8 +103,17 @@ func main() {
 	)
 
 	slog.Info("checking lock file " + lockFileName)
+
+	// remove lock file if its older than 50 seconds
+	s, err = os.Stat(lockFileName)
+	if err == nil && time.Since(s.ModTime()) > 50*time.Second {
+		os.Remove(lockFileName)
+	}
+
 	if lockFile, err := os.OpenFile(lockFileName, os.O_EXCL|os.O_CREATE, 0660); err == nil {
-		defer func() {
+		// remove lock file after 50 seconds, since public key is valid for 60 seconds only
+		go func() {
+			time.Sleep(50 * time.Second)
 			slog.Info("removing lock file " + lockFileName)
 			lockFile.Close()
 			if err := os.Remove(lockFileName); err != nil {
@@ -304,15 +320,28 @@ func startSSMSessionWithPlugin() error {
 
 	endpoint := fmt.Sprintf("https://ssm.%s.amazonaws.com", cfg.Region)
 
-	//go func() {
-	//	time.Sleep(10 * time.Second)
-	//	cmd.Process.Signal(syscall.SIGINT)
-	//}()
+	// find the session-manager-plugin binary using common paths
+	var pluginPath string
+	commonPaths := []string{
+		"session-manager-plugin",                   // $PATH
+		"/usr/local/bin/session-manager-plugin",    // default
+		"/usr/bin/session-manager-plugin",          // linux
+		"/opt/homebrew/bin/session-manager-plugin", // macos (homebrew)
+	}
+	for _, path := range commonPaths {
+		if _, err := os.Stat(path); err == nil {
+			pluginPath = path
+			break
+		}
+	}
+	if pluginPath == "" {
+		return fmt.Errorf("session-manager-plugin binary not found")
+	}
 
 	// Correct the argument order based on the ValidateInputAndStartSession function
 	// (see https://github.com/aws/session-manager-plugin/blob/mainline/src/sessionmanagerplugin/session/session.go)
 	cmd := exec.Command(
-		"session-manager-plugin",
+		pluginPath,
 		string(startSessionResponse), // args[1]: Session response
 		cfg.Region,                   // args[2]: Client region
 		"StartSession",               // args[3]: Operation name
