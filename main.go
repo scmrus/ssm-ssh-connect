@@ -117,34 +117,33 @@ func main() {
 	}
 
 	if lockFile, err := os.OpenFile(lockFileName, os.O_EXCL|os.O_CREATE, 0660); err == nil {
-		// remove lock file after 50 seconds, since public key is valid for 60 seconds only
-		go func() {
-			time.Sleep(50 * time.Second)
-			slog.Info("removing lock file " + lockFileName)
+		// remove lock file on exit
+		defer func() {
 			lockFile.Close()
-			if err := os.Remove(lockFileName); err != nil {
-				slog.Error("failed to remove %s file: "+lockFileName, "error", err)
-			} else {
-				slog.Info("lock file removed")
-			}
+			os.Remove(lockFileName)
 		}()
 
-		slog.Info("lock file created, sending SSH public key")
+		// or remove it after 50 seconds, since public key is valid for 60 seconds only
+		go func() {
+			time.Sleep(50 * time.Second)
+			lockFile.Close()
+			os.Remove(lockFileName)
+		}()
+
 		// send SSH public key
+		slog.Info("sending SSH public key")
 		if err := sendSSHPublicKey(); err != nil {
 			slog.Error("failed to send SSH public key", "error", err)
 		}
 		slog.Info("SSH public key sent")
 	}
 
-	slog.Info("starting SSM session")
-
 	// Start SSM session
+	slog.Info("starting SSM session")
 	err = startSSMSessionWithPlugin()
 	if err != nil {
 		slog.Error("Failed to start SSM session", "error", err)
 	}
-
 	slog.Info("session completed")
 }
 
