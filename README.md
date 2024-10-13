@@ -43,4 +43,4 @@ Before you start, make sure you have:
 
 ## Installation
 
-At the moment, the script is not available as a package. You have to build it from the source code (simple `go build` or `go install`).
+Download the latest release from the [releases page](https://github.com/scmrus/ssm-ssh-connect/releases), extract the archive, and place the `ssm-ssh-connect` script in a directory that is in your PATH.
