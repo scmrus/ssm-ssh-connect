@@ -1,0 +1,91 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build ssm-ssh-connect for macOS (Intel and ARM)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.23
+
+      - name: Build for macOS Intel (amd64)
+        run: |
+          GOOS=darwin GOARCH=amd64 go build -o ssm-ssh-connect
+
+      - name: Archive macOS Intel (amd64) binary
+        run: |
+          tar -czvf ssm-ssh-connect-darwin-amd64.tar.gz ssm-ssh-connect
+
+      - name: Build for macOS ARM (arm64)
+        run: |
+          GOOS=darwin GOARCH=arm64 go build -o ssm-ssh-connect
+
+      - name: Archive macOS ARM (arm64) binary
+        run: |
+          tar -czvf ssm-ssh-connect-darwin-arm64.tar.gz ssm-ssh-connect
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-builds
+          path: |
+            ssm-ssh-connect-darwin-amd64.tar.gz
+            ssm-ssh-connect-darwin-arm64.tar.gz
+
+  release:
+    name: Create GitHub Release and Upload Assets
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-builds
+
+      - name: Create GitHub release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          body: |
+            Automated release for tag ${{ github.ref_name }} of ssm-ssh-connect.
+            Includes builds for:
+            - macOS Intel (amd64)
+            - macOS Apple Silicon (arm64)
+          draft: false
+          prerelease: false
+
+      - name: Upload macOS Intel binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ssm-ssh-connect-darwin-amd64.tar.gz
+          asset_name: ssm-ssh-connect-darwin-amd64.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Upload macOS ARM binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ssm-ssh-connect-darwin-arm64.tar.gz
+          asset_name: ssm-ssh-connect-darwin-arm64.tar.gz
+          asset_content_type: application/gzip
