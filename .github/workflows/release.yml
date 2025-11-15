@@ -21,7 +21,7 @@ jobs:
 
       - name: Build for macOS Intel (amd64)
         run: |
-          GOOS=darwin GOARCH=amd64 go build -o ssm-ssh-connect
+          GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.version=${{ github.ref_name }}" -o ssm-ssh-connect
 
       - name: Archive macOS Intel (amd64) binary
         run: |
@@ -29,7 +29,7 @@ jobs:
 
       - name: Build for macOS ARM (arm64)
         run: |
-          GOOS=darwin GOARCH=arm64 go build -o ssm-ssh-connect
+          GOOS=darwin GOARCH=arm64 go build -ldflags "-X main.version=${{ github.ref_name }}" -o ssm-ssh-connect
 
       - name: Archive macOS ARM (arm64) binary
         run: |
