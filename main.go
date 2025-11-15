@@ -4,18 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/ec2"
-	ec2Types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
-	"github.com/aws/aws-sdk-go-v2/service/ec2instanceconnect"
-	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2Types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/aws-sdk-go-v2/service/ec2instanceconnect"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
 )
 
 type Config struct {
@@ -28,12 +29,21 @@ type Config struct {
 	InstanceUser string `json:"-"`
 }
 
+var version = "dev"
+
 var cfg Config
 var awsConfig aws.Config
 
 func main() {
+	// Handle --version flag
+	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
+		fmt.Printf("ssm-ssh-connect version %s\n", version)
+		os.Exit(0)
+	}
+
 	if len(os.Args) != 4 {
 		fmt.Fprintf(os.Stderr, "Usage: %s <aws-profile> <instance-name> <instance-user>\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "       %s --version\n", os.Args[0])
 		os.Exit(1)
 	}
 	cfg.AwsProfile = os.Args[1]
@@ -360,10 +370,59 @@ func startSSMSessionWithPlugin() error {
 	cmd.Stderr = os.Stderr
 
 	slog.Info("session-manager-plugin start")
-	if err := cmd.Run(); err != nil {
-		slog.Error("session-manager-plugin error: %v", "error", err)
-	}
-	slog.Info("session-manager-plugin end")
 
-	return nil
+	// Store the original parent PID (SSH client)
+	originalPPID := os.Getppid()
+	slog.Debug("original parent PID", "ppid", originalPPID)
+
+	// Start the plugin in a goroutine so we can monitor it
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Run()
+	}()
+
+	// Monitor parent process - if SSH dies, kill the plugin
+	// Check every 1 hour for orphaned sessions
+	checkInterval := 1 * time.Hour
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case err := <-done:
+			// Plugin exited normally
+			if err != nil {
+				slog.Error("session-manager-plugin error: %v", "error", err)
+			}
+			slog.Info("session-manager-plugin end")
+			return nil
+
+		case <-ticker.C:
+			// Check if parent SSH process is still alive
+			currentPPID := os.Getppid()
+			if currentPPID == 1 || currentPPID != originalPPID {
+				// Parent died (reparented to init) or changed
+				slog.Info("parent SSH process died, terminating plugin", "original_ppid", originalPPID, "current_ppid", currentPPID)
+				if cmd.Process != nil {
+					// Try graceful shutdown first
+					cmd.Process.Signal(syscall.SIGTERM)
+
+					// Wait up to 5 seconds for graceful exit
+					select {
+					case <-done:
+						slog.Info("plugin exited gracefully after SIGTERM")
+						return nil
+					case <-time.After(5 * time.Second):
+						// Force kill if not responding
+						slog.Warn("plugin did not exit after SIGTERM, forcing kill")
+						cmd.Process.Kill()
+						<-done
+						return nil
+					}
+				}
+				return nil
+			}
+			slog.Debug("parent process check", "ppid", currentPPID)
+		}
+	}
 }
