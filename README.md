@@ -43,4 +43,13 @@ Before you start, make sure you have:
 
 ## Installation
 
-Download the latest release from the [releases page](https://github.com/scmrus/ssm-ssh-connect/releases), extract the archive, and place the `ssm-ssh-connect` script in a directory that is in your PATH.
+### Homebrew (macOS)
+
+```bash
+brew tap scmrus/apps
+brew install ssm-ssh-connect
+```
+
+### Manual
+
+Download the latest release from the [releases page](https://github.com/scmrus/ssm-ssh-connect/releases), extract the archive, and place the `ssm-ssh-connect` binary in a directory that is in your PATH.
